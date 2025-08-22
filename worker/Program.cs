@@ -16,8 +16,23 @@ namespace Worker
         {
             try
             {
-                var pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
-                var redisConn = OpenRedisConnection("redis");
+                // Get PostgreSQL configuration from environment variables
+                var dbServer = Environment.GetEnvironmentVariable("DB_SERVER") ?? "db";
+                var dbUsername = Environment.GetEnvironmentVariable("DB_USERNAME") ?? "postgres";
+                var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres";
+                var dbName = Environment.GetEnvironmentVariable("DB_NAME") ?? "postgres";
+                var dbPort = Environment.GetEnvironmentVariable("DB_PORT") ?? "5432";
+                
+                var pgsqlConnectionString = $"Server={dbServer};Port={dbPort};Database={dbName};Username={dbUsername};Password={dbPassword};";
+                var pgsql = OpenDbConnection(pgsqlConnectionString);
+                
+                // Get Redis configuration from environment variables
+                var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis";
+                var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
+                var redisPassword = Environment.GetEnvironmentVariable("REDIS_PASSWORD");
+                var redisDatabase = Environment.GetEnvironmentVariable("REDIS_DATABASE") ?? "0";
+                
+                var redisConn = OpenRedisConnection(redisHost, redisPort, redisPassword, redisDatabase);
                 var redis = redisConn.GetDatabase();
 
                 // Keep alive is not implemented in Npgsql yet. This workaround was recommended:
@@ -34,7 +49,7 @@ namespace Worker
                     // Reconnect redis if down
                     if (redisConn == null || !redisConn.IsConnected) {
                         Console.WriteLine("Reconnecting Redis");
-                        redisConn = OpenRedisConnection("redis");
+                        redisConn = OpenRedisConnection(redisHost, redisPort, redisPassword, redisDatabase);
                         redis = redisConn.GetDatabase();
                     }
                     string json = redis.ListLeftPopAsync("votes").Result;
@@ -46,7 +61,7 @@ namespace Worker
                         if (!pgsql.State.Equals(System.Data.ConnectionState.Open))
                         {
                             Console.WriteLine("Reconnecting DB");
-                            pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                            pgsql = OpenDbConnection(pgsqlConnectionString);
                         }
                         else
                         { // Normal +1 vote requested
@@ -102,18 +117,29 @@ namespace Worker
             return connection;
         }
 
-        private static ConnectionMultiplexer OpenRedisConnection(string hostname)
+        private static ConnectionMultiplexer OpenRedisConnection(string hostname, string port, string password, string database)
         {
             // Use IP address to workaround https://github.com/StackExchange/StackExchange.Redis/issues/410
             var ipAddress = GetIp(hostname);
-            Console.WriteLine($"Found redis at {ipAddress}");
+            Console.WriteLine($"Found redis at {ipAddress}:{port}");
+
+            // Build Redis connection string with authentication
+            var redisConnectionString = $"{ipAddress}:{port}";
+            if (!string.IsNullOrEmpty(password))
+            {
+                redisConnectionString = $"{ipAddress}:{port},password={password}";
+            }
+            if (!string.IsNullOrEmpty(database) && database != "0")
+            {
+                redisConnectionString += $",defaultDatabase={database}";
+            }
 
             while (true)
             {
                 try
                 {
                     Console.Error.WriteLine("Connecting to redis");
-                    return ConnectionMultiplexer.Connect(ipAddress);
+                    return ConnectionMultiplexer.Connect(redisConnectionString);
                 }
                 catch (RedisConnectionException)
                 {
