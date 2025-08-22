@@ -17,9 +17,22 @@ io.on('connection', function (socket) {
   });
 });
 
-var pool = new Pool({
-  connectionString: 'postgres://postgres:postgres@db/postgres'
-});
+var dbHost = process.env.DB_SERVER || process.env.PGHOST || 'db';
+var dbPort = process.env.DB_PORT || process.env.PGPORT || '5432';
+var dbUser = process.env.DB_USERNAME || process.env.PGUSER || 'postgres';
+var dbPassword = process.env.DB_PASSWORD || process.env.PGPASSWORD || 'postgres';
+var dbName = process.env.DB_NAME || process.env.PGDATABASE || 'postgres';
+var databaseUrl = process.env.DATABASE_URL;
+
+var pool = databaseUrl
+  ? new Pool({ connectionString: databaseUrl })
+  : new Pool({
+      host: dbHost,
+      port: parseInt(dbPort, 10),
+      user: dbUser,
+      password: dbPassword,
+      database: dbName
+    });
 
 async.retry(
   {times: 1000, interval: 1000},
